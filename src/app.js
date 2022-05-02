@@ -4,7 +4,7 @@ import chalk from "chalk";
 import { MongoClient } from "mongodb";
 import Joi from "joi";
 import dayjs from "dayjs";
-import dotenv  from "dotenv"
+import dotenv from "dotenv"
 
 dotenv.config();
 
@@ -15,14 +15,14 @@ app.use(json());
 let db = null;
 const mongoClient = new MongoClient(process.env.MONGO_URI);
 const promise = mongoClient.connect();
-promise.then( () => {
+promise.then(() => {
     db = mongoClient.db(process.env.BANCO_MANGO);
 })
-promise.catch( e => console.log("Deu ruim pra conectar no banco", e));
+promise.catch(e => console.log("Deu ruim pra conectar no banco", e));
 
 app.post("/participants", async (req, res) => {
 
-    const {name} = req.body;
+    const { name } = req.body;
 
     const newParticipantSchema = Joi.object({
         name: Joi.string().required()
@@ -30,29 +30,29 @@ app.post("/participants", async (req, res) => {
 
     try {
 
-        const participantExist = await db.collection("participants").findOne({name});
-        const validation = newParticipantSchema.validate({name:name});
+        const participantExist = await db.collection("participants").findOne({ name });
+        const validation = newParticipantSchema.validate({ name: name });
         console.log("validacao", participantExist)
-    
-        if (validation.error || participantExist != undefined){
+
+        if (validation.error || participantExist != undefined) {
             res.status(409).send(validation.error)
             console.log(validation.error);
             return;
-        } 
+        }
 
         await db.collection("participants").insertOne(
             {
-                name: name, 
+                name: name,
                 lastStatus: Date.now()
             }
         )
 
         await db.collection("messages").insertOne(
             {
-                from: validation.name, 
-                to: 'Todos', 
-                text: 'entra na sala...', 
-                type: 'status', 
+                from: validation.name,
+                to: 'Todos',
+                text: 'entra na sala...',
+                type: 'status',
                 time: dayjs(Date.now()).format("HH:mm:ss"),
             }
         )
@@ -65,19 +65,19 @@ app.post("/participants", async (req, res) => {
     }
 })
 
-app.get("/participants", async (req,res) =>{
+app.get("/participants", async (req, res) => {
 
-    try{
+    try {
         const allParticipants = await db.collection("participants").find({}).toArray();
         res.status(201).send(allParticipants)
-    
-    } catch (e){
+
+    } catch (e) {
         console.error(error);
         res.sendStatus(500);
     }
 })
 
-app.post("/messages", async (req,res) =>{
+app.post("/messages", async (req, res) => {
 
     const { to, text, type } = req.body;
     const from = req.header.user;
@@ -88,13 +88,13 @@ app.post("/messages", async (req,res) =>{
         type: Joi.string().valid("message", "private_message").required(),
     })
 
-    try{
+    try {
 
-        const participantExist = await db.collection("participants").findOne( {name: from})
-        const validation = newMessageSchema.validate(req.body, { abortEarly: false } );
-    
-        
-        if (participantExist == undefined || validation.error){
+        const participantExist = await db.collection("participants").findOne({ name: from })
+        const validation = newMessageSchema.validate(req.body, { abortEarly: false });
+
+
+        if (participantExist == undefined || validation.error) {
 
             res.status(409).send(validation.error);
             return;
@@ -109,54 +109,79 @@ app.post("/messages", async (req,res) =>{
                     time: dayjs(Date.now()).format("HH:mm:ss")
                 }
             );
-    
+
             res.sendStatus(201);
             return;
         }
 
-    } catch (e){
+    } catch (e) {
         console.error(e);
         res.sendStatus(422);
         return;
     }
 })
 
-app.get("/messages", async (req,res) =>{
+app.get("/messages", async (req, res) => {
 
     const { user } = req.headers
     const { limit } = req.query
 
-    try{
+    try {
 
         const allMessages = await db.collection("messages").find({
             $or: [
-                {to: "Todos"},
-                {to: user},
-                {from: user},
-                {tyoe: "message"},
+                { to: "Todos" },
+                { to: user },
+                { from: user },
+                { tyoe: "message" },
             ],
         }).toArray()
 
         if (limit) {
-            
+
             let limitedMessages = [...allMessages].reverse().slice(0, limit);
             res.status(200).send(limitedMessages.reverse());
             return;
-        
+
         } else {
 
             res.status(200).send(allMessages);
             return;
         }
 
-    }catch (e){
+    } catch (e) {
 
         res.status(500).send(e);
         console.log(e);
         return;
     }
+})
 
-    
+app.post("/status", async (req, res) => {
+    const { user } = req.headers
+
+    try {
+        const allParticipants = db.collection("participants");
+        const participant = await allParticipants.findOne({ user });
+
+        if (!participant) {
+            res.sendStatus(404);
+            return;
+        }
+
+        await allParticipants.updateOne(
+            { name: user },
+            { $set: { lastStatus: Date.now() } }
+        );
+
+        res.sendStatus(200);
+        return;
+
+    } catch (e) {
+
+        res.sendStatus(422);
+        return;
+    }
 })
 
 app.listen(3500, () => {
