@@ -1,119 +1,164 @@
-import express from "express";
+import express, { json } from "express";
 import cors from "cors";
 import chalk from "chalk";
 import { MongoClient } from "mongodb";
+import Joi from "joi";
+import dayjs from "dayjs";
+import dotenv  from "dotenv"
 
-import schema from "./schema.js";
+dotenv.config();
 
 const app = express();
 app.use(cors());
-app.use(express.json());
+app.use(json());
 
 let db = null;
-const mongoClient = new MongoClient("mongodb://127.0.0.1:27017");
+const mongoClient = new MongoClient(process.env.MONGO_URI);
+const promise = mongoClient.connect();
+promise.then( () => {
+    db = mongoClient.db(process.env.BANCO_MANGO);
+})
+promise.catch( e => console.log("Deu ruim pra conectar no banco", e));
 
 app.post("/participants", async (req, res) => {
 
-    const { name } = req.body;
+    const {name} = req.body;
+
+    const newParticipantSchema = Joi.object({
+        name: Joi.string().required()
+    })
 
     try {
-        await mongoClient.connect();
-        db = mongoClient.db(chat-uol);
 
-        const allParticipants = await db.collection("participants").find({}).toArray();
-        const participantExist = allParticipants.find((participant) => participant.name === name);
-        const nameValidation = schema.validate({ name:name });
-
-        if(participantExist != undefined){
-            res.sendStatus(409);
-            mongoClient.close();
+        const participantExist = await db.collection("participants").findOne({name});
+        const validation = newParticipantSchema.validate({name:name});
+        console.log("validacao", participantExist)
+    
+        if (validation.error || participantExist != undefined){
+            res.status(409).send(validation.error)
+            console.log(validation.error);
             return;
-        }
+        } 
 
-        if(nameValidation && participantExist == undefined){
-
-            await db.collection("participants").insertOne({
-                name: nameValidation.name,
+        await db.collection("participants").insertOne(
+            {
+                name: name, 
                 lastStatus: Date.now()
-            });
+            }
+        )
 
-            await db.collection("messages").insertOne({
-                from: nameValidation.name,
-                to: "Todos",
-                text: "Entrou na sala...",
-                type: "Status",
-                time: dayjs(Date.now()).format("HH:MM:SS")
-            });
+        await db.collection("messages").insertOne(
+            {
+                from: validation.name, 
+                to: 'Todos', 
+                text: 'entra na sala...', 
+                type: 'status', 
+                time: dayjs(Date.now()).format("HH:mm:ss"),
+            }
+        )
 
-            res.sendStatus(201);
-            mongoClient.close();
-        }
-    }catch (e){
-        console.error(error);
+        res.sendStatus(201);
+
+    } catch (e) {
+        console.log(e);
         res.sendStatus(422);
-        mongoClient.close()
     }
 })
 
-app.get("/participants", async (res,req) =>{
+app.get("/participants", async (req,res) =>{
 
     try{
-        await mongoClient.connect();
-        db = mongoClient.db(chat-uol);
-
         const allParticipants = await db.collection("participants").find({}).toArray();
-        res.send(allParticipants);
-
-        mongoClient.close()
+        res.status(201).send(allParticipants)
     
     } catch (e){
         console.error(error);
         res.sendStatus(500);
-        mongoClient.close()
     }
 })
 
-app.post("/messages", async (res,req) =>{
+app.post("/messages", async (req,res) =>{
 
     const { to, text, type } = req.body;
     const from = req.header.user;
 
+    const newMessageSchema = Joi.object({
+        to: Joi.string().required(),
+        text: Joi.string().required(),
+        type: Joi.string().valid("message", "private_message").required(),
+    })
+
     try{
 
-        await mongoClient.connect();
-        db = mongoClient.db(chat-uol)
-
-        const allParticipants = await db.collection("participants").find({}).toArray();
-        const participantExist = allParticipants.find((participant) => participant.user === from);
+        const participantExist = await db.collection("participants").findOne( {name: from})
+        const validation = newMessageSchema.validate(req.body, { abortEarly: false } );
     
-        const toAndTextValid = schema.validate({
-            to: to,
-            text: text
-        })
-        const typeValid = schema.validate({ type:type })
+        
+        if (participantExist == undefined || validation.error){
 
-        if (toAndTextValid && typeValid && participantExist){
+            res.status(409).send(validation.error);
+            return;
+        } else {
 
             await db.collection("messages").insertOne(
                 {
-                    to: toAndTextValid.to,
-                    text: toAndTextValid.text,
-                    type: typeValid.type
+                    from: participantExist.name,
+                    to: to,
+                    text: text,
+                    type: type,
+                    time: dayjs(Date.now()).format("HH:mm:ss")
                 }
             );
-
-            res.sendStatus(201)
-            mongoClient.close()
+    
+            res.sendStatus(201);
+            return;
         }
 
     } catch (e){
-        
-        console.error(error);
+        console.error(e);
         res.sendStatus(422);
-        mongoClient.close();
+        return;
     }
 })
 
-app.listen(5000, () => {
+app.get("/messages", async (req,res) =>{
+
+    const { user } = req.headers
+    const { limit } = req.query
+
+    try{
+
+        const allMessages = await db.collection("messages").find({
+            $or: [
+                {to: "Todos"},
+                {to: user},
+                {from: user},
+                {tyoe: "message"},
+            ],
+        }).toArray()
+
+        if (limit) {
+            
+            let limitedMessages = [...allMessages].reverse().slice(0, limit);
+            res.status(200).send(limitedMessages.reverse());
+            return;
+        
+        } else {
+
+            res.status(200).send(allMessages);
+            return;
+        }
+
+    }catch (e){
+
+        res.status(500).send(e);
+        console.log(e);
+        return;
+    }
+
+    
+})
+
+app.listen(3500, () => {
     console.log(chalk.bold.green(`Server is good to go`))
 });
