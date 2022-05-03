@@ -31,7 +31,7 @@ app.post("/participants", async (req, res) => {
     try {
 
         const participantExist = await db.collection("participants").findOne({ name });
-        const validation = newParticipantSchema.validate({ name: name });
+        const validation = newParticipantSchema.validate({ name: name }, { abortEarly: false });
         console.log("validacao", participantExist)
 
         if (validation.error || participantExist != undefined) {
@@ -80,7 +80,7 @@ app.get("/participants", async (req, res) => {
 app.post("/messages", async (req, res) => {
 
     const { to, text, type } = req.body;
-    const from = req.header.user;
+    const { user } = req.headers
 
     const newMessageSchema = Joi.object({
         to: Joi.string().required(),
@@ -90,26 +90,29 @@ app.post("/messages", async (req, res) => {
 
     try {
 
-        const participantExist = await db.collection("participants").findOne({ name: from })
+        const participantExist = await db.collection("participants").findOne({ name:user });
         const validation = newMessageSchema.validate(req.body, { abortEarly: false });
+
+        console.log("existe", participantExist);
+        console.log("validacao", validation);
 
 
         if (participantExist == undefined || validation.error) {
 
-            res.status(409).send(validation.error);
+            res.status(422).send(validation.error);
             return;
         } else {
 
             await db.collection("messages").insertOne(
                 {
-                    from: participantExist.name,
+                    from: user,
                     to: to,
                     text: text,
                     type: type,
                     time: dayjs(Date.now()).format("HH:mm:ss")
                 }
             );
-
+            console.log("from", user)
             res.sendStatus(201);
             return;
         }
@@ -126,14 +129,16 @@ app.get("/messages", async (req, res) => {
     const { user } = req.headers
     const { limit } = req.query
 
-    try {
+    console.log("usuário", user)
 
+    try {
+        
         const allMessages = await db.collection("messages").find({
             $or: [
                 { to: "Todos" },
                 { to: user },
                 { from: user },
-                { tyoe: "message" },
+                { type: "message" },
             ],
         }).toArray()
 
@@ -184,6 +189,35 @@ app.post("/status", async (req, res) => {
     }
 })
 
-app.listen(3500, () => {
+setInterval(async () => {
+
+    try {
+        const allParticipants = await db.collection("participants").find({}).toArray();
+        const isInactive = allParticipants.filter((participant) => { (Date.now() - participant.lastStatus > 10000) })
+
+        allParticipants.forEach(async (participant) => {
+            if (isInactive) {
+
+                await db.collection("participants").deleteOne(participant);
+                await db.collection("messages").insertOne(
+                    {
+                        from: participant.name,
+                        to: 'Todos',
+                        text: 'sai da sala...',
+                        type: 'status',
+                        time: dayjs(Date.now()).format("HH:mm:ss"),
+                    }
+                );
+                return;
+            }
+        })
+
+    } catch (e) {
+        console.log(e);
+    }
+
+}, 15000)
+
+app.listen(5500, () => {
     console.log(chalk.bold.green(`Server is good to go`))
 });
