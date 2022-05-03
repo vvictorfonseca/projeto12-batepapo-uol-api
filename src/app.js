@@ -167,7 +167,7 @@ app.post("/status", async (req, res) => {
 
     try {
         const allParticipants = db.collection("participants");
-        const participant = await allParticipants.findOne({ user });
+        const participant = await allParticipants.findOne({ name:user });
 
         if (!participant) {
             res.sendStatus(404);
@@ -193,24 +193,33 @@ setInterval(async () => {
 
     try {
         const allParticipants = await db.collection("participants").find({}).toArray();
-        const isInactive = allParticipants.filter((participant) => { (Date.now() - participant.lastStatus > 10000) })
-
-        allParticipants.forEach(async (participant) => {
-            if (isInactive) {
-
-                await db.collection("participants").deleteOne(participant);
-                await db.collection("messages").insertOne(
-                    {
-                        from: participant.name,
-                        to: 'Todos',
-                        text: 'sai da sala...',
-                        type: 'status',
-                        time: dayjs(Date.now()).format("HH:mm:ss"),
-                    }
-                );
-                return;
+        const isInactive = allParticipants.filter((participant) => { 
+            
+            if (Date.now() - participant.lastStatus > 10000) {
+                return participant
             }
         })
+
+        if(isInactive.length > 0) {
+
+            allParticipants.forEach(async (participant) => {
+                if (isInactive) {
+    
+                    await db.collection("participants").deleteOne(participant);
+                    await db.collection("messages").insertOne(
+                        {
+                            from: participant.name,
+                            to: 'Todos',
+                            text: 'sai da sala...',
+                            type: 'status',
+                            time: dayjs(Date.now()).format("HH:mm:ss"),
+                        }
+                    );
+                    return;
+                }
+            })
+        }
+        
 
     } catch (e) {
         console.log(e);
